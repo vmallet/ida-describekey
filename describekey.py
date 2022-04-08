@@ -14,11 +14,20 @@ from PyQt5.QtGui import QKeyEvent, QKeySequence, QResizeEvent
 from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetSelectionRange, \
     QVBoxLayout, QHeaderView, QLabel, QHBoxLayout
 
+import ida_idaapi
 import ida_kernwin
+import idaapi
 
 __author__ = "https://github.com/vmallet"
 
 # TODO: use some sort of built-in window/dialog and have iDA remember last position
+
+VERSION = 0.1
+
+DESCRIBE_KEY_ACTION = "DescribeKey"
+DESCRIBE_KEY_TEXT = "Describe Key"
+DESCRIBE_KEY_SHORTCUT = "Alt-Shift-K"
+DESCRIBE_KEY_TOOLTIP = "List all actions associated with a shortcut"
 
 DEBUG = True
 
@@ -319,3 +328,43 @@ class KeyActionHandler(ida_kernwin.action_handler_t):
 
     def update(self, ctx):
         return ida_kernwin.AST_ENABLE_ALWAYS
+
+
+def unregister_action():
+    """Unregister the DescribeKey action from IDA."""
+    ida_kernwin.unregister_action(DESCRIBE_KEY_ACTION)
+
+def register_action():
+    """Register the DescribeKey action with IDA."""
+    unregister_action()
+    desc = ida_kernwin.action_desc_t(
+        DESCRIBE_KEY_ACTION,
+        DESCRIBE_KEY_TEXT,
+        KeyActionHandler(),
+        DESCRIBE_KEY_SHORTCUT,
+        DESCRIBE_KEY_TOOLTIP)
+    return ida_kernwin.register_action(desc)
+
+
+class DescribeKeyPlugin(ida_idaapi.plugin_t):
+    flags = idaapi.PLUGIN_FIX  # Always stay loaded, even without an IDB
+    wanted_name = DESCRIBE_KEY_TEXT
+    wanted_hotkey = DESCRIBE_KEY_SHORTCUT
+    comment = DESCRIBE_KEY_TOOLTIP
+    help = ""
+    version = VERSION
+
+    def init(self):
+        return ida_idaapi.PLUGIN_KEEP  # keep us in the memory
+
+    def term(self):
+        pass
+
+    def run(self, arg):
+        dk = DescribeKey()
+        dk.show()
+
+
+def PLUGIN_ENTRY():
+    """Plugin entry point when loaded as a plugin by IDA."""
+    return DescribeKeyPlugin()
