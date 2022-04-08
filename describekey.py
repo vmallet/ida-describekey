@@ -7,6 +7,7 @@ shortcut, live.
 """
 
 from collections import defaultdict
+from typing import Optional
 
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtCore import Qt
@@ -43,6 +44,9 @@ COL_CHECKABLE = 6
 COL_CHECKED = 7
 COLUMN_COUNT = 8
 
+DIRECT_KEYS = r",./<>?;':\"[]{}()`~!@#$%^&*-_=+"
+"""Keys that shouldn't be mapped to a Qt::Key."""
+
 
 class KeyNamer(object):
     """
@@ -69,12 +73,31 @@ class KeyNamer(object):
             Qt.KeypadModifier: self._keymap[Qt.Key_NumLock],
         }
 
-    def keyevent_to_shortcut(self, event):
+    def keyevent_to_shortcut(self, event) -> Optional[str]:
+        """Attempt to produce IDA-compatible shortcut for keyevent."""
+        text = event.text()
+        if text and text in DIRECT_KEYS:
+            key = text
+        else:
+            # Try to map the key, first using the native virtual key and only
+            # if it's a legit key like "A" or "F1", not "guillemotleft" or "cent"
+            native = self._keymap.get(event.nativeVirtualKey(), None)
+            if native and len(native) > 2:
+                native = None
+            # If we don't have a simple key, try to map the actual event key and
+            # if all else fails, use the event text
+            key = native or self._keymap.get(event.key(), text)
 
-        key = self._keymap.get(event.nativeVirtualKey(), None) \
-              or self._keymap.get(event.key(), event.text())
-        if not key:
+        if key in [None, "Control", "Alt", "Shift", "Meta"]:
             return None
+
+        if event.modifiers() == Qt.ShiftModifier and key in DIRECT_KEYS:
+            # A bit hacky here.. IDA looks at '%' as a non-shifted shortcut, but
+            # on US keyboards you would need shift to produce '%'. So if the only
+            # modifier used with a 'direct key' is Shift, ignore it. This might or
+            # might not work for other locales.
+            return key
+
         sequence = []
         for modifier, text in self._modmap.items():
             if event.modifiers() & modifier:
@@ -167,9 +190,7 @@ class DescribeKey(object):
     def _handle_keyevent(self, event: QKeyEvent, action_map, fn):
         """Intercept key events and update UI with related actions."""
         # First, clear the overlay
-        if self._overlay:
-            self._overlay.hide()
-            self._overlay = None
+        self._dismiss_overlay()
 
         shortcut = self._namer.keyevent_to_shortcut(event)
         self._set_shortcut(shortcut)
@@ -337,6 +358,12 @@ class DescribeKey(object):
         label.raise_()
 
         return label
+
+    def _dismiss_overlay(self):
+        """Hide the help overlay, if it exists."""
+        if self._overlay:
+            self._overlay.hide()
+            self._overlay = None
 
     def show(self):
         """Show the main UI dialog."""
