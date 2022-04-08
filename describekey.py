@@ -21,6 +21,7 @@ import idaapi
 __author__ = "https://github.com/vmallet"
 
 # TODO: use some sort of built-in window/dialog and have iDA remember last position
+# TODO: seems to be having issues with ". ; : / - = <arrow-keys>" keys..˚
 
 VERSION = 0.1
 
@@ -135,6 +136,7 @@ class DescribeKey(object):
         self._shortcut_label = QLabel("Press a shortcut...")
         self._table = self._build_table()
         self._dialog = self._build_dialog()
+        self._overlay = self._build_overlay()
 
     def _build_ast_map(self):
         """Build a Value->Name map of all AST_xxx enum values."""
@@ -164,6 +166,11 @@ class DescribeKey(object):
 
     def _handle_keyevent(self, event: QKeyEvent, action_map, fn):
         """Intercept key events and update UI with related actions."""
+        # First, clear the overlay
+        if self._overlay:
+            self._overlay.hide()
+            self._overlay = None
+
         shortcut = self._namer.keyevent_to_shortcut(event)
         self._set_shortcut(shortcut)
         if DEBUG:
@@ -312,10 +319,28 @@ class DescribeKey(object):
 
         return dialog
 
+    def _build_overlay(self):
+        """
+        Construct the initial help overlay.
+
+        The overlay is a 'floating' widget, child of the dialog. It
+        will be raised on top of the other widgets (the table), and
+        hidden upon the first keypress received.
+        """
+        label = QLabel("Press a shortcut...", self._dialog)
+        label.setStyleSheet("color : #CC3030; font-size: 17px; font-style: italic")
+        label.adjustSize()
+
+        px = (self._dialog.width() - label.width()) / 2
+        label.move(px, 50)
+        label.show()
+        label.raise_()
+
+        return label
+
     def show(self):
-        """Construct and show the main UI dialog."""
-        dialog = self._build_dialog()
-        dialog.exec()
+        """Show the main UI dialog."""
+        self._dialog.exec()
 
 
 class KeyActionHandler(ida_kernwin.action_handler_t):
