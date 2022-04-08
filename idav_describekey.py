@@ -11,13 +11,26 @@ from typing import Tuple, Dict, Any
 
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QKeyEvent, QKeySequence
-from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetSelectionRange, QVBoxLayout, \
-    QHeaderView
+from PyQt5.QtGui import QKeyEvent, QKeySequence, QResizeEvent
+from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetSelectionRange, \
+    QVBoxLayout, QHeaderView, QLabel, QHBoxLayout
 
 import ida_kernwin
 
 __author__ = "https://github.com/vmallet"
+
+# TODO: use some sort of built-in window/dialog and have iDA remember last position
+
+# Column indices for action table
+COL_LABEL = 0
+COL_ACTION = 1
+COL_SHORTCUT = 2
+COL_TOOLTIP = 3
+COL_STATE = 4
+COL_VISIBILITY = 5
+COL_CHECKABLE = 6
+COL_CHECKED = 7
+COLUMN_COUNT = 8
 
 
 class KeyNamer(object):
@@ -98,24 +111,25 @@ class ActionInfo(object):
 
 
 class DescribeKey(object):
-#TODO: docstring
+    #TODO: docstring
 
     def __init__(self):
         self._namer = KeyNamer()
         self._astmap = self._build_ast_map()
+        self._shortcut_label = QLabel("Press a shortcut...")
         self._table = self._build_table()
         self._dialog = self._build_dialog()
 
     def _build_ast_map(self):
         astmap = {
-            ida_kernwin.AST_ENABLE: "AST_ENABLE",
-            ida_kernwin.AST_ENABLE_ALWAYS: "AST_ENABLE_ALWAYS",
-            ida_kernwin.AST_ENABLE_FOR_WIDGET: "AST_ENABLE_FOR_WIDGET",
-            ida_kernwin.AST_ENABLE_FOR_IDB: "AST_ENABLE_FOR_IDB",
-            ida_kernwin.AST_DISABLE: "AST_DISABLE",
-            ida_kernwin.AST_DISABLE_ALWAYS: "AST_DISABLE_ALWAYS",
-            ida_kernwin.AST_DISABLE_FOR_WIDGET: "AST_DISABLE_FOR_WIDGET",
-            ida_kernwin.AST_DISABLE_FOR_IDB: "AST_DISABLE_FOR_IDB",
+            ida_kernwin.AST_ENABLE: "Enable",
+            ida_kernwin.AST_ENABLE_ALWAYS: "Enable Always",
+            ida_kernwin.AST_ENABLE_FOR_WIDGET: "Enable for Widget",
+            ida_kernwin.AST_ENABLE_FOR_IDB: "Enable for IDB",
+            ida_kernwin.AST_DISABLE: "Disable",
+            ida_kernwin.AST_DISABLE_ALWAYS: "Disable Always",
+            ida_kernwin.AST_DISABLE_FOR_WIDGET: "Disable for Widget",
+            ida_kernwin.AST_DISABLE_FOR_IDB: "Disable for IDB",
         }
         return astmap
 
@@ -136,37 +150,42 @@ class DescribeKey(object):
         print("evt: {}  {:X}  {}  {}  {:x}  {:x}".format(event, event.key(), event.text(), shortcut,
                                                          event.nativeVirtualKey(), event.nativeScanCode()))
 
-        actions = action_map.get(shortcut, None) if shortcut else None
-        if actions:
-            self._set_data(actions)
+        self._set_shortcut(shortcut)
 
-        # Only the ESC key go through
+        actions = action_map.get(shortcut, []) if shortcut else []
+        self._set_data(actions)
+
+        # Only the ESC key goes through
         if event.matches(QKeySequence.Cancel):
             fn(event)
 
     def _build_table(self) -> QTableWidget:
         table = QtWidgets.QTableWidget()
-        table.setColumnCount(8)
-        # print("len: {}".format(len(refs)))
+        table.setColumnCount(COLUMN_COUNT)
         table.setRowCount(0)
 
         table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
-        table.setHorizontalHeaderItem(0, QtWidgets.QTableWidgetItem("Label"))
-        table.setHorizontalHeaderItem(1, QtWidgets.QTableWidgetItem("Action"))
-        table.setHorizontalHeaderItem(2, QtWidgets.QTableWidgetItem("Shortcut"))
-        table.setHorizontalHeaderItem(3, QtWidgets.QTableWidgetItem("Description"))
-        table.setHorizontalHeaderItem(4, QtWidgets.QTableWidgetItem("State"))
-        table.setHorizontalHeaderItem(5, QtWidgets.QTableWidgetItem("V"))
-        table.setHorizontalHeaderItem(6, QtWidgets.QTableWidgetItem("C"))
-        table.setHorizontalHeaderItem(7, QtWidgets.QTableWidgetItem("Cd"))
+        table.setHorizontalHeaderItem(COL_LABEL, QtWidgets.QTableWidgetItem("Label"))
+        table.setHorizontalHeaderItem(COL_ACTION, QtWidgets.QTableWidgetItem("Action"))
+        table.setHorizontalHeaderItem(COL_SHORTCUT, QtWidgets.QTableWidgetItem("Shortcut"))
+        table.setHorizontalHeaderItem(COL_TOOLTIP, QtWidgets.QTableWidgetItem("Description"))
+        table.setHorizontalHeaderItem(COL_STATE, QtWidgets.QTableWidgetItem("State"))
+        table.setHorizontalHeaderItem(COL_VISIBILITY, QtWidgets.QTableWidgetItem("V"))
+        table.setHorizontalHeaderItem(COL_CHECKABLE, QtWidgets.QTableWidgetItem("C"))
+        table.setHorizontalHeaderItem(COL_CHECKED, QtWidgets.QTableWidgetItem("Cd"))
 
-        table.setColumnWidth(5, 25)
-        table.setColumnWidth(6, 25)
-        table.setColumnWidth(7, 25)
+        # Magic calculation in attempt to size the State column more or less sensibly
+        state_width = int(table.fontMetrics().width("Disable for Widget") * 1.2) + 5
 
-        for i in range(8):
+        table.setColumnWidth(COL_SHORTCUT, 88)
+        table.setColumnWidth(COL_STATE, state_width)
+        table.setColumnWidth(COL_VISIBILITY, 25)
+        table.setColumnWidth(COL_CHECKABLE, 25)
+        table.setColumnWidth(COL_CHECKED, 25)
+
+        for i in range(COLUMN_COUNT):
             table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignLeft)
 
         table.verticalHeader().setHidden(True)
@@ -176,8 +195,7 @@ class DescribeKey(object):
 
         table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         table.horizontalHeader().setStretchLastSection(False)
-        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-
+        table.horizontalHeader().setSectionResizeMode(COL_TOOLTIP, QHeaderView.Stretch)
 
         table.setShowGrid(False)
         # table.cellDoubleClicked.connect(self._cell_activated)
@@ -188,7 +206,21 @@ class DescribeKey(object):
         old_fn = table.keyPressEvent
         table.keyPressEvent = lambda a: self._handle_keyevent(a, action_map, old_fn)
 
+        old_resize = table.resizeEvent
+        def resizeEvent(evt: QResizeEvent):
+            """Size LABEL and ACTION columns proportionally to table width"""
+            width = evt.size().width()
+            if width != evt.oldSize().width():
+                self._table.setColumnWidth(COL_LABEL, width / 5)
+                self._table.setColumnWidth(COL_ACTION, width / 5)
+            old_resize(evt)
+
+        table.resizeEvent = resizeEvent
+
         return table
+
+    def _set_shortcut(self, shortcut):
+        self._shortcut_label.setText(shortcut)
 
     def _set_data(self, actions):
         self._table.clearContents()
@@ -200,53 +232,61 @@ class DescribeKey(object):
             # Label
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, info.label)
-            self._table.setItem(i, 0, item)
+            self._table.setItem(i, COL_LABEL, item)
 
             # Action
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, info.action)
-            self._table.setItem(i, 1, item)
+            self._table.setItem(i, COL_ACTION, item)
 
             # Shortcut
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, info.shortcut)
-            self._table.setItem(i, 2, item)
+            self._table.setItem(i, COL_SHORTCUT, item)
 
             # Tooltip
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, info.tooltip)
-            self._table.setItem(i, 3, item)
+            self._table.setItem(i, COL_TOOLTIP, item)
 
             # State
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole,
                          self._astmap.get(info.state, None) or str(info.state))
-            self._table.setItem(i, 4, item)
+            self._table.setItem(i, COL_STATE, item)
 
             # Visibility
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, "V" if info.visibility else "")
-            self._table.setItem(i, 5, item)
+            self._table.setItem(i, COL_VISIBILITY, item)
 
             # Checkable
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, "Y" if info.checkable else "")
-            self._table.setItem(i, 6, item)
+            self._table.setItem(i, COL_CHECKABLE, item)
 
             # Checked
             item = QtWidgets.QTableWidgetItem()
             item.setData(QtCore.Qt.DisplayRole, "Y" if info.checked else "")
-            self._table.setItem(i, 7, item)
+            self._table.setItem(i, COL_CHECKED, item)
+
+    def _build_status(self):
+        layout = QHBoxLayout()
+        layout.addWidget(QLabel("Shortcut: "))
+        layout.addWidget(self._shortcut_label)
+        layout.addStretch()
+        layout.setContentsMargins(5, 5, 5, 5)
+        return layout
 
     def _build_dialog(self):
         dialog = QDialog()
-        dialog.setWindowTitle("Key Attempt 2")
-        dialog.setMinimumSize(300, 200)
-        dialog.resize(700, 500)
+        dialog.setWindowTitle("Describe Key")
+        dialog.resize(800, 200)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._table)
+        layout.addLayout(self._build_status())
         dialog.setLayout(layout)
 
         return dialog
