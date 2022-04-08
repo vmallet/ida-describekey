@@ -7,7 +7,6 @@ shortcut, live.
 """
 
 from collections import defaultdict
-from typing import Tuple, Dict, Any
 
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtCore import Qt
@@ -20,6 +19,8 @@ import ida_kernwin
 __author__ = "https://github.com/vmallet"
 
 # TODO: use some sort of built-in window/dialog and have iDA remember last position
+
+DEBUG = True
 
 # Column indices for action table
 COL_LABEL = 0
@@ -35,33 +36,28 @@ COLUMN_COUNT = 8
 
 class KeyNamer(object):
     """
-    Provide a mean to get an IDA-compatible shortcut representation of
+    Provide a means to get an IDA-compatible shortcut representation of
     a key event.
 
     See keyevent_to_shortcut()
     """
 
     def __init__(self):
-        self._keymap, self._modmap = self._init_key_names()
-
-    def _init_key_names(self) -> Tuple[Dict[int, str], Dict[Any, str]]:
-        """Init the key tables necessary to identify shortcuts"""
-        keymap = dict()
+        # Key names
+        self._keymap = dict()
         for key, value in vars(Qt).items():
             if isinstance(value, Qt.Key):
-                # print("key: {}   value: {:X}".format(key, value))
-                keymap[value] = key.partition('_')[2]
+                self._keymap[value] = key.partition('_')[2]
 
-        modmap = {
+        # Modifier names. Note: insertion order matters, should match IDA's modifier order
+        self._modmap = {
             Qt.ControlModifier: "Ctrl",
             Qt.AltModifier: "Alt",
             Qt.ShiftModifier: "Shift",
             Qt.MetaModifier: "Meta",
-            Qt.GroupSwitchModifier: keymap[Qt.Key_AltGr],
-            Qt.KeypadModifier: keymap[Qt.Key_NumLock],
-            }
-
-        return keymap, modmap
+            Qt.GroupSwitchModifier: self._keymap[Qt.Key_AltGr],
+            Qt.KeypadModifier: self._keymap[Qt.Key_NumLock],
+        }
 
     def keyevent_to_shortcut(self, event):
 
@@ -111,7 +107,18 @@ class ActionInfo(object):
 
 
 class DescribeKey(object):
-    #TODO: docstring
+    """
+    A custom dialog that will show all actions registered with a
+    shortcut when one is pressed.
+
+    Actions matching a shortcut are displayed in a QTableWidget.
+
+    Key-presses are intercepted by the table widget with a custom
+    keyPressEvent() handler, and turned into shortcuts that can
+    be used to look up the corresponding actions.
+
+    ESC to exit.
+    """
 
     def __init__(self):
         self._namer = KeyNamer()
@@ -121,6 +128,7 @@ class DescribeKey(object):
         self._dialog = self._build_dialog()
 
     def _build_ast_map(self):
+        """Build a Value->Name map of all AST_xxx enum values."""
         astmap = {
             ida_kernwin.AST_ENABLE: "Enable",
             ida_kernwin.AST_ENABLE_ALWAYS: "Enable Always",
@@ -134,6 +142,7 @@ class DescribeKey(object):
         return astmap
 
     def _build_action_map(self):
+        """Return a Shortcut->Action map of all registered actions."""
         action_map = defaultdict(list)
 
         actions = ida_kernwin.get_registered_actions()
@@ -145,12 +154,14 @@ class DescribeKey(object):
         return action_map
 
     def _handle_keyevent(self, event: QKeyEvent, action_map, fn):
+        """Intercept key events and update UI with related actions."""
         shortcut = self._namer.keyevent_to_shortcut(event)
-        # TODO: remove debug
-        print("evt: {}  {:X}  {}  {}  {:x}  {:x}".format(event, event.key(), event.text(), shortcut,
-                                                         event.nativeVirtualKey(), event.nativeScanCode()))
-
         self._set_shortcut(shortcut)
+        if DEBUG:
+            print("evt: {}  key: {:7X}  native key: {:2X}  native scancode: {:2X}  "
+                  "text: {:1}  shortcut: {}".format(
+                type(event), event.key(), event.nativeVirtualKey(), event.nativeScanCode(),
+                event.text(), shortcut))
 
         actions = action_map.get(shortcut, []) if shortcut else []
         self._set_data(actions)
@@ -160,12 +171,15 @@ class DescribeKey(object):
             fn(event)
 
     def _build_table(self) -> QTableWidget:
+        """Construct the table widget used to display actions."""
         table = QtWidgets.QTableWidget()
         table.setColumnCount(COLUMN_COUNT)
         table.setRowCount(0)
 
         table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        table.setRangeSelected(QTableWidgetSelectionRange(0, 0, 0, 0), True)
+        table.setShowGrid(False)
 
         table.setHorizontalHeaderItem(COL_LABEL, QtWidgets.QTableWidgetItem("Label"))
         table.setHorizontalHeaderItem(COL_ACTION, QtWidgets.QTableWidgetItem("Action"))
@@ -179,6 +193,9 @@ class DescribeKey(object):
         # Magic calculation in attempt to size the State column more or less sensibly
         state_width = int(table.fontMetrics().width("Disable for Widget") * 1.2) + 5
 
+        table.horizontalHeader().setStretchLastSection(False)
+        table.horizontalHeader().setSectionResizeMode(COL_TOOLTIP, QHeaderView.Stretch)
+
         table.setColumnWidth(COL_SHORTCUT, 88)
         table.setColumnWidth(COL_STATE, state_width)
         table.setColumnWidth(COL_VISIBILITY, 25)
@@ -189,26 +206,17 @@ class DescribeKey(object):
             table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignLeft)
 
         table.verticalHeader().setHidden(True)
-        # table.resizeRowToContents()
         table.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         table.verticalHeader().setMaximumSectionSize(19)   # TODO: '19' magic constant
 
-        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        table.horizontalHeader().setStretchLastSection(False)
-        table.horizontalHeader().setSectionResizeMode(COL_TOOLTIP, QHeaderView.Stretch)
-
-        table.setShowGrid(False)
-        # table.cellDoubleClicked.connect(self._cell_activated)
-        # table.cellActivated.connect(self._cell_activated)
-        table.setRangeSelected(QTableWidgetSelectionRange(0, 0, 0, 0), True)
-
+        # We build the action map once for the lifetime of the dialog
         action_map = self._build_action_map()
-        old_fn = table.keyPressEvent
-        table.keyPressEvent = lambda a: self._handle_keyevent(a, action_map, old_fn)
+        old_kp = table.keyPressEvent
+        table.keyPressEvent = lambda evt: self._handle_keyevent(evt, action_map, old_kp)
 
         old_resize = table.resizeEvent
         def resizeEvent(evt: QResizeEvent):
-            """Size LABEL and ACTION columns proportionally to table width"""
+            """Size LABEL and ACTION columns proportionally to table width."""
             width = evt.size().width()
             if width != evt.oldSize().width():
                 self._table.setColumnWidth(COL_LABEL, width / 5)
@@ -220,9 +228,11 @@ class DescribeKey(object):
         return table
 
     def _set_shortcut(self, shortcut):
+        """Set the current shortcut being displayed by the UI."""
         self._shortcut_label.setText(shortcut)
 
     def _set_data(self, actions):
+        """Set the actions being displayed by the UI (in the table)."""
         self._table.clearContents()
         self._table.setRowCount(len(actions))
 
@@ -271,6 +281,7 @@ class DescribeKey(object):
             self._table.setItem(i, COL_CHECKED, item)
 
     def _build_status(self):
+        """Construct the status line for the UI."""
         layout = QHBoxLayout()
         layout.addWidget(QLabel("Shortcut: "))
         layout.addWidget(self._shortcut_label)
@@ -279,6 +290,7 @@ class DescribeKey(object):
         return layout
 
     def _build_dialog(self):
+        """Construct the main UI dialog."""
         dialog = QDialog()
         dialog.setWindowTitle("Describe Key")
         dialog.resize(800, 200)
@@ -292,6 +304,7 @@ class DescribeKey(object):
         return dialog
 
     def show(self):
+        """Construct and show the main UI dialog."""
         dialog = self._build_dialog()
         dialog.exec()
 
@@ -299,6 +312,7 @@ class DescribeKey(object):
 class KeyActionHandler(ida_kernwin.action_handler_t):
 
     def activate(self, ctx):
+        # Build a new dialog for every invocation of the action
         dk = DescribeKey()
         dk.show()
         return False
